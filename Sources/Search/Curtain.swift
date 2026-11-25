@@ -18,8 +18,29 @@ struct Veil: Codable, Identifiable, Equatable {
     /// the same; they rarely have the same shape in the same corner.
     var note: String?
     var date: Date
+    /// Moved or resized rather than taken off (⇧⌘H, a drag on the thing or
+    /// on its right or bottom edge). Nil: hidden.
+    var shape: Shape?
 
     var id: String { selector }
+
+    /// Where a thing was moved to and how big it was made, in CSS pixels:
+    /// only what was changed.
+    struct Shape: Codable, Equatable {
+        var width: Double?
+        var height: Double?
+        var dx: Double?
+        var dy: Double?
+
+        /// This one's changes over an earlier one's.
+        func over(_ old: Shape?) -> Shape {
+            Shape(width: width ?? old?.width, height: height ?? old?.height,
+                  dx: dx ?? old?.dx, dy: dy ?? old?.dy)
+        }
+
+        var moved: Bool { dx != nil || dy != nil }
+        var resized: Bool { width != nil || height != nil }
+    }
 }
 
 @MainActor
@@ -43,6 +64,22 @@ final class Curtain: ObservableObject {
         var list = byHost[host] ?? []
         guard !list.contains(where: { $0.selector == selector }) else { return }
         list.append(Veil(selector: selector, label: label, note: note, date: Date()))
+        byHost[host] = list
+        save()
+    }
+
+    /// One thing moved or resized: kept with what was done to it before,
+    /// and last in the list, so ⌘Z takes this change back first.
+    func shape(_ selector: String, label: String, note: String, shape: Veil.Shape, on host: String) {
+        var list = byHost[host] ?? []
+        let old = list.first { $0.selector == selector }
+        guard old == nil || old?.shape != nil else { return }  // hidden already
+        list.removeAll { $0.selector == selector }
+        let made = shape.over(old?.shape)
+        let did = made.moved && made.resized ? "Moved and resized" : made.moved ? "Moved" : "Resized"
+        let plain = old.map { $0.label.components(separatedBy: " · ").dropFirst().joined(separator: " · ") } ?? label
+        list.append(Veil(selector: selector, label: did + " · " + (plain.isEmpty ? label : plain),
+                         note: note, date: Date(), shape: made))
         byHost[host] = list
         save()
     }
@@ -76,7 +113,7 @@ final class Curtain: ObservableObject {
     func css(on host: String?, without spared: String? = nil) -> String {
         veils(on: host)
             .filter { $0.selector != spared }
-            .map { Curtain.rule($0.selector) }
+            .map { veil in veil.shape.map { Curtain.shapeRule(veil.selector, $0) } ?? Curtain.rule(veil.selector) }
             .joined(separator: "\n")
     }
 
@@ -90,6 +127,24 @@ final class Curtain: ObservableObject {
     /// than taking the rule down.
     nonisolated static func rule(_ selector: String) -> String {
         ":is(\(selector)):not(#office-veiled):not(#office-veiled):not(#office-veiled) { display: none !important; }"
+    }
+
+    /// One thing moved or resized, with the same weight as a hiding rule.
+    /// Moved with `translate`, which leaves the page's own layout where it
+    /// was, so nothing around it jumps.
+    nonisolated static func shapeRule(_ selector: String, _ shape: Veil.Shape) -> String {
+        func px(_ value: Double) -> String { "\(Int(value.rounded()))px" }
+        var parts: [String] = []
+        if shape.resized { parts.append("box-sizing: border-box !important") }
+        if let width = shape.width {
+            parts += ["width: \(px(width)) !important", "max-width: none !important",
+                      "min-width: 0 !important", "flex: none !important"]
+        }
+        if let height = shape.height {
+            parts += ["height: \(px(height)) !important", "max-height: none !important", "min-height: 0 !important"]
+        }
+        if shape.moved { parts.append("translate: \(px(shape.dx ?? 0)) \(px(shape.dy ?? 0)) !important") }
+        return ":is(\(selector)):not(#office-veiled):not(#office-veiled):not(#office-veiled) { \(parts.joined(separator: "; ")); }"
     }
 
     // MARK: - the file
@@ -138,6 +193,11 @@ final class VeilRelay: NSObject, WKScriptMessageHandler {
                 tab?.pickingFailed(trouble)
             } else if body["off"] as? Bool == true {
                 tab?.pickingEnded()
+            } else if let selector = body["selector"] as? String, let made = body["shape"] as? [String: Any] {
+                let shape = Veil.Shape(width: made["width"] as? Double, height: made["height"] as? Double,
+                                       dx: made["dx"] as? Double, dy: made["dy"] as? Double)
+                tab?.shaped(selector: selector, label: body["label"] as? String ?? selector,
+                            note: body["note"] as? String ?? "", shape: shape)
             } else if let selector = body["selector"] as? String {
                 tab?.picked(
                     selector: selector,
@@ -348,8 +408,73 @@ enum Veiling {
         return only(whole, el) ? whole : null;
       }
 
+      // Pressed on the outlined thing: a click hides it, a drag moves it,
+      // and a drag from near its right or bottom edge resizes it.
+      var press = null, EDGE = 10;
+      // What the hand sets while it drags, and puts back as the page had it
+      // once the site's stylesheet holds the change.
+      var HELD = ['translate', 'width', 'height', 'max-width', 'min-width', 'max-height', 'min-height', 'flex', 'box-sizing'];
+      function own(el) {
+        return HELD.map(function (k) { return [k, el.style.getPropertyValue(k), el.style.getPropertyPriority(k)]; });
+      }
+
+      function edgeOf(el, x, y) {
+        var r = el.getBoundingClientRect();
+        var right = x <= r.right && x >= r.right - EDGE && y >= r.top && y <= r.bottom;
+        var bottom = y <= r.bottom && y >= r.bottom - EDGE && x >= r.left && x <= r.right;
+        return right && bottom ? 'both' : right ? 'width' : bottom ? 'height' : null;
+      }
+
+      function cursorFor(edge) {
+        return edge === 'both' ? 'nwse-resize' : edge === 'width' ? 'ew-resize'
+             : edge === 'height' ? 'ns-resize' : 'crosshair';
+      }
+
+      function shift(el) {
+        var t = getComputedStyle(el).translate;
+        if (!t || t === 'none') return { dx: 0, dy: 0 };
+        var p = t.split(/\\s+/);
+        return { dx: parseFloat(p[0]) || 0, dy: parseFloat(p[1] || '0') || 0 };
+      }
+
+      function drag(e) {
+        var dx = e.clientX - press.x, dy = e.clientY - press.y;
+        if (!press.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+        press.moved = true;
+        var el = press.el, st = el.style;
+        if (press.mode === 'move') {
+          press.dx = press.base.dx + dx;
+          press.dy = press.base.dy + dy;
+          st.setProperty('translate', press.dx + 'px ' + press.dy + 'px', 'important');
+        } else {
+          st.setProperty('box-sizing', 'border-box', 'important');
+          if (press.mode !== 'height') {
+            press.width = Math.max(20, press.rect.width + dx);
+            st.setProperty('width', press.width + 'px', 'important');
+            st.setProperty('max-width', 'none', 'important');
+            st.setProperty('min-width', '0', 'important');
+            st.setProperty('flex', 'none', 'important');
+          }
+          if (press.mode !== 'width') {
+            press.height = Math.max(20, press.rect.height + dy);
+            st.setProperty('height', press.height + 'px', 'important');
+            st.setProperty('max-height', 'none', 'important');
+            st.setProperty('min-height', '0', 'important');
+          }
+        }
+        place(el);
+      }
+
       function onMove(e) {
         if (!live) return;
+        if (press) { e.preventDefault(); return drag(e); }
+        // On the outlined thing's right or bottom edge: it stays outlined,
+        // with the cursor that says it can be pulled.
+        if (target) {
+          var edge = edgeOf(target, e.clientX, e.clientY);
+          document.documentElement.style.cursor = cursorFor(edge);
+          if (edge) return place(target);
+        }
         var el = document.elementFromPoint(e.clientX, e.clientY);
         if (!el || el === frame || el === document.documentElement || el === document.body) return;
         // Still over the same thing: a wider choice made with ↑ stays,
@@ -401,6 +526,41 @@ enum Veiling {
         // very first element under it, or a trackpad tap.
         var el = target || document.elementFromPoint(e.clientX, e.clientY);
         if (!el || el === frame || el === document.documentElement || el === document.body) return;
+        var mode = edgeOf(el, e.clientX, e.clientY) || 'move';
+        press = { el: el, x: e.clientX, y: e.clientY, mode: mode, rect: el.getBoundingClientRect(),
+                  base: shift(el), moved: false, own: own(el) };
+      }
+
+      function onUp(e) {
+        if (!live) return;
+        swallow(e);
+        if (!press) return;
+        var p = press, el = p.el;
+        press = null;
+        if (p.moved) {
+          var sel = selectorFor(el);
+          if (!sel) {
+            window.webkit.messageHandlers.officeVeil.postMessage({ trouble: 'it has no name of its own on this page' });
+            return;
+          }
+          var made = p.mode === 'move' ? { dx: Math.round(p.dx), dy: Math.round(p.dy) } : {};
+          if (p.width !== undefined) made.width = Math.round(p.width);
+          if (p.height !== undefined) made.height = Math.round(p.height);
+          window.webkit.messageHandlers.officeVeil.postMessage({ selector: sel, label: name(el), note: shape(el), shape: made });
+          // The site's stylesheet holds it from here; the hand's own
+          // styles go once that has come.
+          setTimeout(function () {
+            p.own.forEach(function (o) {
+              if (o[1]) el.style.setProperty(o[0], o[1], o[2]); else el.style.removeProperty(o[0]);
+            });
+            place(el);
+          }, 700);
+          return;
+        }
+        hideNow(el);
+      }
+
+      function hideNow(el) {
         try {
           var sel = selectorFor(el);
           if (!sel) throw 'it has no name of its own on this page';
@@ -420,10 +580,12 @@ enum Veiling {
 
       var presses = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click',
                      'dblclick', 'contextmenu', 'touchstart'];
+      function handler(kind) { return kind === 'pointerdown' ? onPress : kind === 'pointerup' ? onUp : swallow; }
 
       function off() {
         if (!live) return;
         live = false;
+        press = null;
         target = null;
         under = null;
         trail = [];
@@ -434,7 +596,7 @@ enum Veiling {
         document.removeEventListener('keydown', onKey, true);
         window.removeEventListener('pagehide', off);
         presses.forEach(function (kind) {
-          document.removeEventListener(kind, kind === 'pointerdown' ? onPress : swallow, true);
+          document.removeEventListener(kind, handler(kind), true);
         });
         window.webkit.messageHandlers.officeVeil.postMessage({ off: true });
       }
@@ -453,7 +615,7 @@ enum Veiling {
           // Search no longer pointing at anything.
           window.addEventListener('pagehide', off);
           presses.forEach(function (kind) {
-            document.addEventListener(kind, kind === 'pointerdown' ? onPress : swallow, true);
+            document.addEventListener(kind, handler(kind), true);
           });
         },
         off: off,

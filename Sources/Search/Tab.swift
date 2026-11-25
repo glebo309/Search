@@ -1572,6 +1572,12 @@ final class Tab: ObservableObject, Identifiable {
         onPick?(self, selector, label, note)
     }
 
+    /// A thing on the page moved or resized while pointing (Curtain.shape).
+    var onShape: ((Tab, String, String, String, Veil.Shape) -> Void)?
+    func shaped(selector: String, label: String, note: String, shape: Veil.Shape) {
+        onShape?(self, selector, label, note, shape)
+    }
+
     /// Show one hidden thing while the pointer rests on its row in the list.
     func peek(_ selector: String, keeping css: String) {
         web.evaluateInSearch(

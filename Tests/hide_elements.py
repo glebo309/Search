@@ -113,6 +113,9 @@ PRESS = """(function () {
   var at = window.__probeAt, under = document.elementFromPoint(at[0], at[1]);
   var e = new PointerEvent('pointerdown', {clientX: at[0], clientY: at[1], bubbles: true, cancelable: true});
   under.dispatchEvent(e);
+  // A click ends with the button coming up: the picker hides then, a press
+  // that moved being a drag (move or resize) instead.
+  under.dispatchEvent(new PointerEvent('pointerup', {clientX: at[0], clientY: at[1], bubbles: true, cancelable: true}));
   return e.defaultPrevented;
 })()"""
 KEY = """(function () {

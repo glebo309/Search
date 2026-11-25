@@ -42,6 +42,7 @@ class Page(BaseHTTPRequestHandler):
 # listening in Search's own world.
 PICK = ("(function(){var el=document.getElementById('ad');var r=el.getBoundingClientRect();"
         "el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:r.left+3,clientY:r.top+3}));"
+        "el.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientX:r.left+3,clientY:r.top+3}));"
         "return 'pressed'})()")
 SHOWN = "getComputedStyle(document.getElementById('ad')).display"
 

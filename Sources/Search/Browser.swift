@@ -7743,6 +7743,14 @@ final class Browser: NSObject, ObservableObject {
                 announce(Self.keptOnScreen)
             }
         }
+        tab.onShape = { [weak self] tab, selector, label, note, shape in
+            guard let self, let host = curtain.host(of: tab.address) else { return }
+            // A private tab writes nothing down: the change lasts this page.
+            guard !tab.shy else { return announce("Changed on this page only, in a private tab") }
+            curtain.shape(selector, label: label, note: note, shape: shape, on: host)
+            reveil(host)
+            announce((shape.resized ? "Resized" : "Moved") + ", kept for this site. ⌘Z puts it back")
+        }
         tab.onPickEnd = { [weak self] tab in
             guard let self, picking === tab else { return }
             veiling = false
