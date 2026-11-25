@@ -11,6 +11,10 @@ let package = Package(
         .library(name: "DevToolsLite", type: .dynamic, targets: ["DevToolsLite"]),
         .library(name: "DevToolsFull", type: .dynamic, targets: ["DevToolsFull"]),
     ],
+    // The terminal in the side panel (PanelBar.swift): MIT, Miguel de Icaza.
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.11.2"),
+    ],
     targets: [
         // What Search and a developer tools package say to each other.
         .target(
@@ -38,7 +42,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Search",
-            dependencies: ["SearchPluginAPI"],
+            dependencies: ["SearchPluginAPI", .product(name: "SwiftTerm", package: "SwiftTerm")],
             path: "Sources/Search",
             // Same reasoning as the canvas app next door: the whole interface is
             // main-thread by nature, and Swift 6's strict isolation buys nothing

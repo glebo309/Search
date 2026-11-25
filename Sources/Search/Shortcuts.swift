@@ -120,7 +120,7 @@ struct KeyCombo: Codable, Hashable {
         let system: Set<KeyCombo> = [
             KeyCombo("q"), KeyCombo("q", option: true), KeyCombo("q", control: true),
             KeyCombo("q", shift: true), KeyCombo("q", shift: true, option: true),
-            KeyCombo("h"), KeyCombo("h", option: true), KeyCombo("m"), KeyCombo("m", option: true),
+            KeyCombo("h"), KeyCombo("m"),
             KeyCombo("c"), KeyCombo("v"), KeyCombo("x"), KeyCombo("a"), KeyCombo("z"), KeyCombo("z", shift: true),
             KeyCombo("`"), KeyCombo("`", shift: true), KeyCombo("f", control: true),
             KeyCombo("space"), KeyCombo("space", command: false, control: true),
@@ -246,7 +246,9 @@ struct Command: Identifiable {
         Command("view.reloadOrigin", "Reload Page From Origin", .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
         Command("view.reader", "Reading Mode", .view, KeyCombo("r", shift: true)) { $0.toggleReader() },
         Command("view.float", "Float Video", .view, KeyCombo("p", shift: true)) { $0.toggleFloat() },
-        Command("view.sitePanel", "Show Side Panel", .view, nil) { $0.toggleSitePanel() },
+        Command("view.sitePanel", "Show Side Panel", .view, nil) { $0.togglePanelBar() },
+        Command("view.terminal", "Terminal", .view, KeyCombo("t", option: true)) { $0.togglePanel(.terminal) },
+        Command("view.bookmarksPanel", "Bookmarks in the Side Panel", .view, KeyCombo("b", option: true)) { $0.togglePanel(.bookmarks) },
         Command("view.dusk", "Darken This Site", .view, KeyCombo("d", shift: true)) { $0.toggleDusk() },
         Command("view.duskPause", "Pause Darkening", .view, KeyCombo("d", shift: true, option: true)) { $0.pauseDusk() },
         Command("view.summarize", "Summarize Page", .view, nil) { $0.summarizePage() },
@@ -327,14 +329,14 @@ struct Command: Identifiable {
         },
         Command("tabs.mute", "Stop Sound in Tab", .tabs, KeyCombo("m", shift: true)) { $0.pauseMedia() },
 
-        Command("bookmarks.add", "Add This Page", .bookmarks, KeyCombo("b", shift: true)) { $0.bookmarkCurrent() },
+        Command("bookmarks.add", "Add This Page", .bookmarks, KeyCombo("b")) { $0.bookmarkCurrent() },
         Command("bookmarks.show", "Show Bookmarks…", .bookmarks, nil) { $0.bookmarking = true },
-        Command("bookmarks.bar", "Show Bookmarks Bar", .bookmarks, nil) { browser in
+        Command("bookmarks.bar", "Show Bookmarks Bar", .bookmarks, KeyCombo("b", shift: true)) { browser in
             withAnimation(Motion.glide) { browser.prefs.bookmarksBar.toggle() }
         },
 
-        Command("history.show", "Show History…", .history, KeyCombo("y")) { $0.recalling = true },
-        Command("history.downloads", "Downloads…", .history, KeyCombo("j", shift: true)) { $0.showDownloads() },
+        Command("history.show", "Show History…", .history, KeyCombo("y")) { $0.togglePanel(.history) },
+        Command("history.downloads", "Downloads…", .history, KeyCombo("j", shift: true)) { $0.togglePanel(.downloads) },
         Command("history.archive", "Archived Tabs…", .history, nil) { $0.archiving = true },
         Command("history.clearData", "Clear Browsing Data…", .history, KeyCombo("delete", shift: true)) { $0.clearBrowsingData() },
         Command("history.clear", "Clear History", .history, nil) { $0.clearHistory() },

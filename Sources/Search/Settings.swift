@@ -667,6 +667,15 @@ struct SettingsPanel: View {
             Ticks(items: [("Back", Binding(get: { !prefs.hidesBack }, set: { on in withAnimation(Motion.glide) { prefs.hidesBack = !on } })),
                           ("Forward", Binding(get: { !prefs.hidesForward }, set: { on in withAnimation(Motion.glide) { prefs.hidesForward = !on } })),
                           ("Reload", Binding(get: { !prefs.hidesReload }, set: { on in withAnimation(Motion.glide) { prefs.hidesReload = !on } }))])
+        case "panel.bar":
+            Switch(on: Binding(get: { prefs.panelBar }, set: { on in withAnimation(Motion.panel) { prefs.panelBar = on } }))
+        case "panel.restores": Switch(on: $prefs.panelBarRestores)
+        case "helm.size":
+            Segmented(options: HelmSize.allCases.map { ($0, $0.title) },
+                      selection: Binding(get: { prefs.helmSize }, set: { size in withAnimation(Motion.glide) { prefs.helmSize = size } }))
+        case "helm.look":
+            Segmented(options: HelmLook.allCases.map { ($0, $0.title) },
+                      selection: Binding(get: { prefs.helmLook }, set: { look in withAnimation(Motion.glide) { prefs.helmLook = look } }))
         case "foot.shown":
             Ticks(items: [("Extensions", Binding(get: { !prefs.hidesExtensionsDoor }, set: { on in withAnimation(Motion.glide) { prefs.hidesExtensionsDoor = !on } })),
                           ("Bookmarks", Binding(get: { !prefs.hidesBookmarksDoor }, set: { on in withAnimation(Motion.glide) { prefs.hidesBookmarksDoor = !on } })),

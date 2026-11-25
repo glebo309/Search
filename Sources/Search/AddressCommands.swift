@@ -165,7 +165,6 @@ enum AddressCommand: Equatable {
         if Command.archive.contains(id), prefs.tabLife == .never { return false }
         if Command.capture.contains(id), !prefs.capturesPages { return false }
         if Command.styles.contains(id), !prefs.sitesStyles || browser.active?.shy == true { return false }
-        if id == "view.sitePanel", !prefs.sitesInPanel { return false }
         if id == "tabs.pinRow", !prefs.showsPinRows { return false }
         if id == "view.foldGroups", !browser.canFoldAllGroups { return false }
         if id == "view.unfoldGroups", !browser.canUnfoldAllGroups { return false }

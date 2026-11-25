@@ -114,8 +114,23 @@ struct SideBar: View {
     private var lightsBand: CGFloat { browser.fullScreen ? 8 : Metrics.iconLights }
     /// What sits above the pins: the lights' band, and with icons only the
     /// three doors under it.
+    /// Narrower than sideMin with its titles: back, forward and reload on a
+    /// row of their own under the lights, which keep the first row whole.
+    private var helmBelow: Bool {
+        !icons && width < 20 + Metrics.sideLights + Metrics.helm(prefs) && !browser.fullScreen && Metrics.helm(prefs) > 0
+    }
+    /// The foot's doors one above the other: with icons, or narrowed with
+    /// titles once the doors that always show no longer fit across.
+    private var footStacked: Bool {
+        icons || width < SideFoot.keptWidth(prefs, spaces: SpaceButtons.count(prefs, browser.spaces)) + 20
+    }
+    /// Back, forward and reload one above the other once even their own row
+    /// doesn't fit under the lights.
+    private var helmStacked: Bool { helmBelow && width < Metrics.helmDoors(prefs) + 20 }
+    /// The stacked doors' height (Helm, vertical).
+    private var stackedHelm: CGFloat { Metrics.helmDoors(prefs, stacked: true) }
     private var top: CGFloat {
-        !icons ? Metrics.strip : !strip ? lightsBand + Metrics.helmDoors(prefs) + 8 : lightsBand + (stripUp ? stackedDoors : 0)
+        !icons ? Metrics.strip + (helmBelow ? (helmStacked ? stackedHelm + 8 : Metrics.strip) : 0) : !strip ? lightsBand + stackedHelm + 8 : lightsBand + (stripUp ? stackedDoors : 0)
     }
     private var innerEdge: Alignment { onRight ? .leading : .trailing }
 
@@ -172,7 +187,7 @@ struct SideBar: View {
     /// (no width held; the strip's is fixed) — the same in either direction
     /// while it is held.
     static func held(_ wanted: CGFloat, narrows: Bool) -> (narrow: Bool, width: CGFloat?) {
-        guard narrows else { return (false, min(Metrics.sideMax, max(Metrics.sideMin, wanted))) }
+        guard narrows else { return (false, min(Metrics.sideMax, max(Metrics.sideLeast, wanted))) }
         if wanted < Metrics.narrowLine { return (true, nil) }
         return (false, min(Metrics.sideMax, wanted))
     }
@@ -224,6 +239,9 @@ struct SideBar: View {
             if icons {
                 DragStrip(menu: columnMenu)
                     .frame(height: lightsBand)
+            } else if helmBelow {
+                DragStrip(menu: columnMenu)
+                    .frame(height: Metrics.strip)
             } else {
                 HStack(spacing: 0) {
                     DragStrip(menu: columnMenu)
@@ -254,6 +272,22 @@ struct SideBar: View {
                             .frame(maxWidth: .infinity)
                             .padding(.bottom, 8)
                     }
+                } else if helmBelow {
+                    Color.clear.frame(height: Metrics.strip)
+                    if helmStacked {
+                        Helm(browser: browser, vertical: true)
+                            .frame(maxWidth: .infinity)
+                            .padding(.bottom, 8)
+                    } else {
+                        Helm(browser: browser, spread: true)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: Metrics.strip)
+                    }
+                    if prefs.addressLine {
+                        AddressLine(browser: browser, height: prefs.sideRow)
+                            .padding(.bottom, 6)
+                            .zIndex(1)
+                    }
                 } else {
                     HStack(spacing: 0) {
                         Color.clear.frame(width: lights)
@@ -261,7 +295,7 @@ struct SideBar: View {
                             FoldDoor(browser: browser, right: prefs.sidePosition == .right)
                                 .padding(.trailing, SideBar.foldDoor(true) - 26)
                         }
-                        Helm(browser: browser)
+                        Helm(browser: browser, spread: !prefs.doorsUp)
                         Spacer(minLength: 0)
                     }
                     .frame(height: Metrics.strip)
@@ -342,7 +376,7 @@ struct SideBar: View {
                         // two go up together, the doors just under the edge.
                         .modifier(Rise(y: doorsFoot ? 0 : SideBar.footBox - 10))
                         .animation(SideBar.footIn, value: doorsFoot)
-                        .frame(height: icons ? nil : doorsFoot ? SideBar.footBox : 0, alignment: .top)
+                        .frame(height: icons || (footStacked && doorsFoot) ? nil : doorsFoot ? SideBar.footBox : 0, alignment: .top)
                         .clipped()
                         .transaction(value: doorsFoot) { $0.animation = nil }
                         .allowsHitTesting(doorsFoot)
@@ -416,7 +450,7 @@ struct SideBar: View {
         }
         // A fixed width with icons only: nothing to pull. The strip keeps
         // its edge, to be pulled back out to titles.
-        .overlay(alignment: innerEdge) { if !icons || strip { edge } }
+        .overlay(alignment: innerEdge) { if !icons || strip || prefs.squeezedColumn { edge } }
         .onDrop(of: [.url, .text], isTargeted: $landing) { providers in
             browser.take(providers)
         }
@@ -456,17 +490,19 @@ struct SideBar: View {
     /// hairline; as cards, in the gap before the page.
     private var edge: some View {
         EdgeGrip(lit: onEdge || grabbed != nil)
-            .offset(x: onFrame ? 0 : onRight ? -4 : 4)
-            .frame(width: 9)
+            // The pill where it was with the old 9-wide edge.
+            .offset(x: onFrame ? (onRight ? -1.5 : 1.5) : (onRight ? 2.5 : -2.5))
+            // 12 wide: edge to edge all inside the column, as cards over
+            // the whole gap before the page and 4 into the column.
+            .frame(width: 12)
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
-            .onHover { over in
-                onEdge = over
-                if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
+            .resizeEdge { over in onEdge = over }
+            .offset(x: onFrame ? 0 : onRight ? -Metrics.cardGap : Metrics.cardGap)
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
+                        NSCursor.resizeLeftRight.set()
                         // Taken from the strip, as if a little short of the
                         // line: a short pull brings the titles back, where
                         // the strip's own width would need a long one.
@@ -476,6 +512,9 @@ struct SideBar: View {
                         let held = SideBar.held(wanted, narrows: prefs.narrowsToIcons)
                         if held.narrow != prefs.narrowed, prefs.narrowsToIcons {
                             withAnimation(Motion.glide) { prefs.narrowed = held.narrow }
+                        }
+                        if !prefs.narrowsToIcons, let w = held.width, (w < Metrics.squeezeLine) != prefs.squeezed {
+                            withAnimation(Motion.glide) { prefs.squeezed = w < Metrics.squeezeLine }
                         }
                         live = held.width
                         onDrag(live)
@@ -921,6 +960,7 @@ struct SideBar: View {
             if icons {
                 IconTile(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
                          pill: pill, close: {}, interactive: false)
+                    .frame(maxWidth: prefs.squeezedColumn ? .infinity : nil)
             } else {
                 SideRow(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
                         pill: pill, close: {}, interactive: false)
@@ -1022,6 +1062,7 @@ struct SideBar: View {
             } else {
                 IconTile(browser: browser, prefs: prefs, tab: tab, live: tab.id == activeID,
                          pill: pill, close: close, interactive: interactive)
+                    .frame(maxWidth: prefs.squeezedColumn ? .infinity : nil)
             }
         } else if let pair, pages.count >= 2 {
             SplitTabItem(browser: browser, prefs: prefs, pages: pages,
@@ -1645,7 +1686,7 @@ struct SideBar: View {
     /// one above the other.
     private var footHeight: CGFloat {
         if !doorsFoot || stripUp { return 10 }
-        return icons ? stackedDoors : SideBar.footBox
+        return footStacked ? stackedDoors : SideBar.footBox
     }
     /// Between what plays in another tab and the foot's doors.
     private static let playerGap: CGFloat = 4
@@ -1695,7 +1736,11 @@ struct SideBar: View {
 
     /// One small door at the bottom: the settings.
     private var foot: some View {
-        SideFoot(browser: browser, prefs: prefs, fetches: browser.fetches, vertical: icons, live: doorsFoot, width: width)
+        // Narrowed with its titles, the row stacks only once the doors that
+        // always show no longer fit across.
+        SideFoot(browser: browser, prefs: prefs, fetches: browser.fetches,
+                 vertical: footStacked,
+                 live: doorsFoot, width: width)
     }
 
 }
@@ -2482,13 +2527,17 @@ struct Door: View {
     /// The hold opened its menu: the click that ends the press is the
     /// menu's, not the button's.
     @State private var opened = false
+    @Environment(\.doorScale) private var scale
+    @Environment(\.doorLook) private var look
+    @Environment(\.doorSpread) private var spread
 
     var body: some View {
+        let box = (26 * scale).rounded()
         Button {
             if opened { opened = false } else { act() }
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 11 * scale, weight: .medium))
                 // At rest in the ground's own grey, as a tab's title is: the
                 // plain ground's Palette.muted, but black or white let
                 // through, so it stands off whatever it lies on. An opaque
@@ -2496,12 +2545,18 @@ struct Door: View {
                 // ground is whatever is behind the window.
                 .foregroundStyle(on ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : greys.muted))
                 .offset(x: nudge)
-                .frame(width: 26, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(on ? greys.wash : (hovering ? greys.hover : .clear))
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(width: box, height: box)
+                .background {
+                    if look == .circles {
+                        Circle().fill(on ? greys.wash : (hovering ? greys.hover : greys.hover.opacity(0.55)))
+                    } else {
+                        RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+                            .fill(on ? greys.wash : (hovering ? greys.hover : .clear))
+                    }
+                }
+                // Spread, each takes its share of the row, up to twice its own.
+                .frame(maxWidth: spread ? box * 2 : nil)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .simultaneousGesture(

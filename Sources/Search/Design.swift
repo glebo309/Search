@@ -104,6 +104,26 @@ struct Greys {
     }
 }
 
+/// Back, forward and reload's size and look, handed to their doors (Helm).
+private struct DoorScaleKey: EnvironmentKey { static let defaultValue: CGFloat = 1 }
+private struct DoorLookKey: EnvironmentKey { static let defaultValue = HelmLook.plain }
+private struct DoorSpreadKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var doorScale: CGFloat {
+        get { self[DoorScaleKey.self] }
+        set { self[DoorScaleKey.self] = newValue }
+    }
+    var doorLook: HelmLook {
+        get { self[DoorLookKey.self] }
+        set { self[DoorLookKey.self] = newValue }
+    }
+    /// Each door takes an even share of the row's width.
+    var doorSpread: Bool {
+        get { self[DoorSpreadKey.self] }
+        set { self[DoorSpreadKey.self] = newValue }
+    }
+}
+
 private struct GreysKey: EnvironmentKey {
     static let defaultValue = Greys.white
 }
@@ -196,12 +216,18 @@ enum Metrics {
     /// three unless some are hidden, nothing when none is.
     @MainActor static func helm(_ prefs: Preferences) -> CGFloat {
         let n = CGFloat(prefs.helmDoors)
-        return n == 0 ? 0 : n * 26 + (n - 1) * 2 + 8
+        return n == 0 ? 0 : n * helmDoor(prefs) + (n - 1) * 2 + 8 + helmPill(prefs)
     }
-    @MainActor static func helmDoors(_ prefs: Preferences) -> CGFloat {
+    /// `stacked`: one above the other, where they keep the classic size so
+    /// the strip of icons stays 52 wide (Helm).
+    @MainActor static func helmDoors(_ prefs: Preferences, stacked: Bool = false) -> CGFloat {
         let n = CGFloat(prefs.helmDoors)
-        return n == 0 ? 0 : n * 26 + (n - 1) * 4
+        return n == 0 ? 0 : n * (stacked ? 26 : helmDoor(prefs)) + (n - 1) * 4 + helmPill(prefs)
     }
+    /// One of back, forward and reload, at the size chosen (HelmSize).
+    @MainActor static func helmDoor(_ prefs: Preferences) -> CGFloat { (26 * prefs.helmSize.scale).rounded() }
+    /// The capsule's air either side, drawn as a pill (HelmLook).
+    @MainActor static func helmPill(_ prefs: Preferences) -> CGFloat { prefs.helmLook == .pill ? 8 : 0 }
     /// Tabs are a fixed width rather than the width of their titles, so the
     /// cross always lands in the same place and the row never rearranges
     /// itself while you read it. They give way when there are too many:
@@ -250,6 +276,14 @@ enum Metrics {
     /// The column of titles down the left, in the way that has one.
     static let side: CGFloat = 232
     static let sideMin: CGFloat = 176
+    /// How narrow the column can be pulled with narrowing to the strip off:
+    /// under sideMin it lays out as icons at the width pulled to
+    /// (Preferences.squeezed), down to the icon column's own width.
+    static let sideLeast: CGFloat = 52
+    /// Between this and sideMin the column keeps its titles, with back,
+    /// forward and reload on a row of their own under the lights; under it,
+    /// it lays out as icons (Preferences.squeezed).
+    static let squeezeLine: CGFloat = 80
     /// Narrower than this, with Narrow to icons on, the column is the strip
     /// of icons (Preferences.narrowStrip).
     static let narrowLine: CGFloat = 200
@@ -282,6 +316,71 @@ struct EdgeGrip: View {
             .animation(Motion.quick, value: lit)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+}
+
+/// An edge that resizes: the left-right cursor and hover, kept by AppKit.
+/// SwiftUI's onHover with NSCursor push/pop missed the edge when the pointer
+/// came in fast or from a page, and the page's own cursor then won, so the
+/// edge only sometimes took the pointer. A cursor rect, and a tracking area
+/// that sets the cursor on every move, hold it the whole time the pointer is
+/// over the edge, as the split divider does (PaneStage.swift). The view lets
+/// clicks through to the SwiftUI drag under it.
+struct ResizeEdgeCursor: NSViewRepresentable {
+    let hover: (Bool) -> Void
+
+    func makeNSView(context: Context) -> EdgeCursorView {
+        let view = EdgeCursorView()
+        view.hover = hover
+        return view
+    }
+
+    func updateNSView(_ view: EdgeCursorView, context: Context) {
+        view.hover = hover
+    }
+
+    final class EdgeCursorView: NSView {
+        var hover: ((Bool) -> Void)?
+        private var inside = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .activeInActiveApp, .inVisibleRect],
+                owner: self, userInfo: nil))
+            window?.invalidateCursorRects(for: self)
+        }
+
+        override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+        override func mouseMoved(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+
+        override func mouseEntered(with event: NSEvent) {
+            NSCursor.resizeLeftRight.set()
+            set(true)
+        }
+
+        override func mouseExited(with event: NSEvent) { set(false) }
+
+        private func set(_ on: Bool) {
+            guard on != inside else { return }
+            inside = on
+            hover?(on)
+        }
+    }
+}
+
+extension View {
+    /// The left-right cursor over this view, and whether the pointer is on it.
+    func resizeEdge(hover: @escaping (Bool) -> Void) -> some View {
+        overlay(ResizeEdgeCursor(hover: hover))
     }
 }
 
@@ -361,6 +460,12 @@ enum Motion {
 
     static var settle: Animation? {
         reduced ? nil : light ? .easeOut(duration: 0.16) : .spring(response: 0.30, dampingFraction: 0.86)
+    }
+
+    /// Panels coming and going, and the page giving them room: an ease, no
+    /// spring, so nothing overshoots and settles back.
+    static var panel: Animation? {
+        reduced ? nil : .easeInOut(duration: 0.24)
     }
 
     static var quick: Animation? {

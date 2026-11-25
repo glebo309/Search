@@ -214,12 +214,17 @@ struct SearchApp: App {
                     .shortcut("view.reader")
                 Button("Float Video") { browser.toggleFloat() }
                     .shortcut("view.float")
-                // Websites in the side panel, only once they are on
-                // (Settings › General).
-                if browser.prefs.sitesInPanel {
-                    Menu("Side Panel") {
-                        Button(browser.sidePanelShown ? "Close Side Panel" : "Show Side Panel") { browser.toggleSitePanel() }
-                            .shortcut("view.sitePanel")
+                // The panel bar and its panels (PanelBar.swift); websites
+                // in it only once they are on (Settings › General).
+                Menu("Side Panel") {
+                    Button(browser.prefs.panelBar ? "Hide Side Panel" : "Show Side Panel") { browser.togglePanelBar() }
+                        .shortcut("view.sitePanel")
+                    Divider()
+                    Button("Bookmarks") { browser.togglePanel(.bookmarks) }
+                        .shortcut("view.bookmarksPanel")
+                    Button("Terminal") { browser.togglePanel(.terminal) }
+                        .shortcut("view.terminal")
+                    if browser.prefs.sitesInPanel {
                         Divider()
                         ForEach(PanelSites.offered, id: \.name) { site in
                             Button(site.name) { browser.showSiteInPanel(site.url) }
@@ -476,9 +481,12 @@ struct SearchApp: App {
                     }
                 }
                 Divider()
-                Button("Show History…") { browser.recalling = true }
+                // In the panel bar's panel (PanelBar.swift); the full
+                // History page stays one item down.
+                Button("Show History") { browser.togglePanel(.history) }
                     .shortcut("history.show")
-                Button("Downloads…") { browser.showDownloads() }
+                Button("History Page…") { browser.recalling = true }
+                Button("Downloads") { browser.togglePanel(.downloads) }
                     .shortcut("history.downloads")
                 // Only while tabs close by themselves (Closing.swift).
                 if browser.prefs.tabLife != .never {
@@ -678,15 +686,19 @@ struct ContentView: View {
                     }
                 }
                 .padding(.leading, sideOnRight ? laidFar + panelRoom : 0)
-                .padding(.trailing, sideOnRight ? 0 : laidFar + panelRoom)
+                .padding(.trailing, sideOnRight ? 0 : laidFar + panelRoom + barRoom)
                 .padding(.bottom, laidFar)
                 .padding(.leading, sideOnRight ? 0 : roomed.width)
                 .padding(.trailing, sideOnRight ? roomed.width : 0)
                 .padding(.top, roomed.height)
                 // On whole pixels as it slides: between them, the page was
                 // drawn resampled, soft, for the length of the slide.
-                .modifier(PixelOffset(offset: CGSize(width: sideOnRight ? farGap - laidFar : chrome.width - roomed.width,
-                                                     height: chrome.height - roomed.height),
+                // Only while the column's edge is held does the page slide
+                // rather than take its room (see make(room:)); otherwise its
+                // frame itself moves, laid out at every step of the glide.
+                .modifier(PixelOffset(offset: edges.side == nil ? .zero
+                                      : CGSize(width: sideOnRight ? farGap - laidFar : chrome.width - roomed.width,
+                                               height: chrome.height - roomed.height),
                                       scale: displayScale))
                 .modifier(CardEdge(on: cards && !browser.prefs.splitView, insets: cardInsets,
                                    corner: cardCorner, scale: displayScale))
@@ -697,6 +709,13 @@ struct ContentView: View {
             // An extension's side panel, on the side away from the column
             // (see SidePanel.swift); two pages in Split View share what's left.
             if panelRoom > 0 { sidePanel }
+
+            // The panel bar down the far edge (PanelBar.swift).
+            if barRoom > 0 {
+                PanelBar(browser: browser, prefs: browser.prefs)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .transition(.move(edge: .trailing))
+            }
 
             // The column of tabs is Fold's, in its place beside the page or
             // folded away (see Fold.swift).
@@ -709,7 +728,10 @@ struct ContentView: View {
             // The bookmarks bar, under the strip or beside the column's top —
             // there on the window's ground above the page's card, and no wider.
             if barShown {
-                BookmarksBar(browser: browser, bookmarks: browser.bookmarks, onFrame: cards)
+                // With the tabs folded away, its row starts clear of the
+                // window's lights; the bar itself still runs to the edge.
+                BookmarksBar(browser: browser, bookmarks: browser.bookmarks, onFrame: cards,
+                             lead: browser.folded && !sideOnRight ? max(0, Metrics.sideLights - chrome.width) : 0)
                     .padding(.leading, sideOnRight ? farGap : chrome.width)
                     .padding(.trailing, sideOnRight ? chrome.width : farGap)
                     .padding(.top, band)
@@ -723,6 +745,8 @@ struct ContentView: View {
             .onChange(of: geo.size.height) { _, height in tall = height } } }
         .animation(Motion.glide, value: browser.prefs.sidebar)
         .animation(Motion.glide, value: browser.prefs.sidePosition)
+        .animation(Motion.panel, value: panelUp)
+        .animation(Motion.panel, value: barRoom)
         .onAppear {
             if room == nil { room = chrome }
             if farRoom == nil { farRoom = farGap }
@@ -744,9 +768,7 @@ struct ContentView: View {
         // column's room back. Never slid: what moves is the column, after.
         .onChange(of: browser.foldingAway) { _, away in
             roomTicket += 1
-            var still = Transaction()
-            still.disablesAnimations = true
-            withTransaction(still) {
+            withAnimation(Motion.panel) {
                 if away, sidebar {
                     // Edge to edge once folded: the whole window, at once.
                     room = CGSize(width: foldedWidth, height: cards && !barShown ? 0 : roomed.height)
@@ -838,7 +860,7 @@ struct ContentView: View {
     /// Where the card lies in the window, animated with the column: what
     /// the column and the strip take, and the gaps beyond.
     private var cardInsets: EdgeInsets {
-        let far = farGap + panelRoom
+        let far = farGap + panelRoom + (sideOnRight ? 0 : barRoom)
         return EdgeInsets(top: chrome.height, leading: sideOnRight ? far : chrome.width,
                           bottom: farGap, trailing: sideOnRight ? chrome.width : far)
     }
@@ -870,7 +892,7 @@ struct ContentView: View {
     private var panelWidth: CGFloat {
         let asked = edges.panel ?? browser.prefs.sidePanelWidth
         guard across > 0 else { return asked }
-        let left = across - chrome.width - farGap * 2 - 320
+        let left = across - chrome.width - farGap * 2 - 320 - barRoom
         return max(240, min(asked, left))
     }
 
@@ -881,6 +903,12 @@ struct ContentView: View {
         panelUp ? panelWidth + (panelCard ? Metrics.cardGap : 1) : 0
     }
 
+    /// The panel bar's width at the far edge: on, with the column on the
+    /// left, and no page filling the screen.
+    private var barRoom: CGFloat {
+        browser.prefs.panelBar && !sideOnRight && fullscreenTab == nil ? PanelBar.width : 0
+    }
+
     /// The side panel as a card: as the page is.
     private var panelCard: Bool { cards && !edgeToEdge }
 
@@ -889,17 +917,19 @@ struct ContentView: View {
                         card: panelCard, width: panelWidth, onDrag: { [edges] in edges.panel = $0 })
             .padding(.top, chrome.height)
             .padding(.bottom, farGap)
-            .padding(sideOnRight ? .leading : .trailing, farGap)
+            .padding(sideOnRight ? .leading : .trailing, farGap + barRoom)
             .frame(maxWidth: .infinity, maxHeight: .infinity,
                    alignment: sideOnRight ? .topLeading : .topTrailing)
-            .transition(.opacity)
+            // In from the window's edge, as the column comes in, rather than
+            // faded in beside a page that had already given it its room.
+            .transition(.move(edge: sideOnRight ? .leading : .trailing))
     }
 
-    /// The bookmarks bar is up: asked for, there are bookmarks, the tabs
-    /// aren't folded away or under a video filling the screen, and it isn't
-    /// in the column instead (SideBookmarks).
+    /// The bookmarks bar is up: asked for, there are bookmarks, no video
+    /// fills the screen, and it isn't in the column instead (SideBookmarks).
+    /// Its own panel: it stays when the tabs fold away (it went with them).
     private var barShown: Bool {
-        browser.bookmarksBarForTab && !browser.prefs.sideBookmarks && !browser.bookmarks.isEmpty && !browser.folded
+        browser.bookmarksBarForTab && !browser.prefs.sideBookmarks && !browser.bookmarks.isEmpty
             && fullscreenTab == nil
     }
 
@@ -916,59 +946,42 @@ struct ContentView: View {
     /// A column being dragged wider or narrower is followed as it goes.
     private func make(room new: CGSize, after old: CGSize) {
         let now = roomed
-        // The column's edge held: the page slides with it rather than being
-        // laid out again at every width it goes through. Wider, it runs on
-        // past the window's far edge; narrower, it is resized only every 40
-        // points, each time with that much to spare. Let go, it is resized
-        // once, to its room (below).
+        // The column's edge held: the page is laid out once, as wide as the
+        // narrowest column would leave it, and from then on only slides
+        // with the edge. Its far side always reaches past the card's, which
+        // cuts it, so no strip of nothing opens there and nothing is laid
+        // out again while the edge moves: resized every 40 points (and
+        // never under sideMin), or at every step, the far side jumped as
+        // the page caught up a frame late. Let go, it is resized once, to
+        // its room (below).
         if edges.side != nil, new.height == now.height, new.width > Metrics.cardGap {
             roomTicket += 1
-            guard new.width < now.width else { return }
+            let least = Metrics.sideLeast
+            guard now.width > least else { return }
             var still = Transaction()
             still.disablesAnimations = true
-            withTransaction(still) { room = CGSize(width: max(Metrics.sideMin, new.width - 40), height: new.height) }
+            withTransaction(still) { room = CGSize(width: least, height: new.height) }
             return
         }
-        // The card's far gap coming back as the column does (see
-        // `edgeToEdge`): the page keeps the whole window until the slide is
-        // over, the card closing in over it.
-        let far = farGap
-        let farComing = far > laidFar
-        // Given already, with the chrome itself (see `immersing`).
-        if now == new, !farComing {
-            roomTicket += 1
-            if farRoom != far {
-                var still = Transaction()
-                still.disablesAnimations = true
-                withTransaction(still) { farRoom = far }
-            }
-            return
-        }
-        // Out of nothing, or out of the card's gap (see chrome): never more
-        // than that unless something is there. Edge to edge, the gap is
-        // what arrives.
-        let floor = Metrics.cardGap
-        let arriving = (old.width <= floor && new.width > old.width, old.height <= floor && new.height > old.height)
-        var at = now
-        if !arriving.0 { at.width = new.width }
-        if !arriving.1 { at.height = new.height }
+        // Anything else (the column folding away or coming back, the
+        // bookmarks bar, the side panel's gap): the page takes its new room
+        // in the same glide as what moves, its frame laid out at every step
+        // as a window being resized is: it was slid at its old size and laid
+        // out again once the slide was over, so its content was dragged out
+        // past the window's edge and then jumped into place.
         roomTicket += 1
-        var still = Transaction()
-        still.disablesAnimations = true
-        // With Reduce Motion on, nothing slides: the page takes its new room
-        // with the chrome, not after a slide that isn't there.
-        withTransaction(still) {
-            room = Motion.reduced ? new : at
-            farRoom = Motion.reduced || !farComing ? far : laidFar
-        }
-        guard !Motion.reduced, arriving.0 || arriving.1 || farComing else { return }
-        let ticket = roomTicket
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
-            guard ticket == roomTicket else { return }
+        if Motion.reduced || now == new && laidFar == farGap {
+            var still = Transaction()
+            still.disablesAnimations = true
             withTransaction(still) {
-                room = chrome
+                room = new
                 farRoom = farGap
             }
+            return
+        }
+        withAnimation(Motion.panel) {
+            room = new
+            farRoom = farGap
         }
     }
 
@@ -1196,6 +1209,9 @@ struct ContentView: View {
             }
             // On the right, the lights sit in the column's corner, which
             // moves with its edge.
+            .onChange(of: browser.prefs.squeezed) { _, _ in
+                DispatchQueue.main.async { Lights.refresh(window); measureLights() }
+            }
             .onChange(of: edges.side) { _, _ in
                 guard sideOnRight else { return }
                 DispatchQueue.main.async { Lights.refresh(window); measureLights() }

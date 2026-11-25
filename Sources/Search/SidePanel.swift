@@ -34,6 +34,10 @@ enum SidePanelContent: Equatable {
     /// Downloads, for whoever chose it in Settings › Downloads › Open
     /// Downloads: the same list as its tab, beside every page.
     case downloads
+    /// The panel bar's own (PanelBar.swift): bookmarks, history and a shell.
+    case bookmarks
+    case history
+    case terminal
 }
 
 /// The sites offered in View › Side Panel, as they are typed: a short list,
@@ -783,8 +787,14 @@ struct SidePanelView: View {
         case .downloads:
             // As tall as the panel, as its list is in a tab.
             DownloadsPanel(browser: browser, loot: browser.loot, compact: true,
-                           close: { browser.closeSidePanel() })
+                           close: { browser.closeBarPanel() })
                 .environment(\.asTab, true)
+        case .bookmarks:
+            BookmarksSide(browser: browser)
+        case .history:
+            HistorySide(browser: browser)
+        case .terminal:
+            TerminalSide(browser: browser)
         case nil:
             Color.clear
         }
@@ -915,11 +925,7 @@ struct SidePanelBeside: View {
         EdgeGrip(lit: over || start != nil)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .onHover { inside in
-                guard inside != over else { return }
-                over = inside
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
+            .resizeEdge { inside in over = inside }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { drag in

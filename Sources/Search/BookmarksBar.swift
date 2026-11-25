@@ -32,6 +32,9 @@ struct BookmarksBar: View {
     /// side: the ground's colour and no line of its own, the card's edge
     /// being the line (see CardEdge).
     var onFrame = false
+    /// Room kept clear at the bar's start, inside it: the window's lights,
+    /// with the tabs folded away. The bar itself still runs edge to edge.
+    var lead: CGFloat = 0
 
     static let height: CGFloat = 30
     /// The space between two on the bar, and the air at its ends.
@@ -62,7 +65,7 @@ struct BookmarksBar: View {
     var body: some View {
         let _ = Bench.count("bar")
         let roots = bookmarks.roots
-        let shown = room > 0 ? BookmarksBar.fit(roots.map { widths[$0.id] ?? 0 }, room: room) : roots.count
+        let shown = room > 0 ? BookmarksBar.fit(roots.map { widths[$0.id] ?? 0 }, room: room - lead) : roots.count
         let hidden = Array(roots.dropFirst(shown))
         let _ = Bench.barHides(browser, hidden)
         // The row over the bar rather than in it: a row longer than the
@@ -101,6 +104,7 @@ struct BookmarksBar: View {
             }
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, BookmarksBar.air)
+            .padding(.leading, lead)
         }
         .clipped()
         .overlay(alignment: .trailing) {

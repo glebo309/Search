@@ -789,8 +789,32 @@ struct Helm: View {
     @ObservedObject var browser: Browser
     /// One above the other, for the column of icons.
     var vertical = false
+    /// Spread across the room it is given, each an even share: on a row of
+    /// their own under the lights (SideBar.helmBelow).
+    var spread = false
+    @ObservedObject private var prefs: Preferences
+    @Environment(\.greys) private var greys
+
+    init(browser: Browser, vertical: Bool = false, spread: Bool = false) {
+        self.browser = browser
+        self.vertical = vertical
+        self.spread = spread
+        self.prefs = browser.prefs
+    }
 
     var body: some View {
+        doors
+            .environment(\.doorScale, vertical ? 1 : prefs.helmSize.scale)
+            .environment(\.doorLook, prefs.helmLook)
+            .environment(\.doorSpread, spread && !vertical)
+            .padding(.horizontal, prefs.helmLook == .pill && !vertical ? 4 : 0)
+            .padding(.vertical, prefs.helmLook == .pill && vertical ? 4 : 0)
+            .background {
+                if prefs.helmLook == .pill { Capsule(style: .continuous).fill(greys.hover.opacity(0.55)) }
+            }
+    }
+
+    @ViewBuilder private var doors: some View {
         if let tab = browser.active {
             Wheel(browser: browser, tab: tab, vertical: vertical)
         } else {

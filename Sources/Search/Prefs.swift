@@ -11,6 +11,41 @@ import WebKit
 
 /// What a tab wears beside its title, and what a pinned one is reduced to: a
 /// letter, or the site's own icon.
+/// How big back, forward and reload are drawn (Settings › Appearance).
+enum HelmSize: String, CaseIterable, Identifiable {
+    case small, medium, large
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
+        }
+    }
+    /// The door's box and its symbol, against the classic 26 and 11.
+    var scale: CGFloat {
+        switch self {
+        case .small: return 1
+        case .medium: return 1.15
+        case .large: return 1.3
+        }
+    }
+}
+
+/// How back, forward and reload are drawn: bare symbols, each on a soft
+/// circle, or the three in one capsule.
+enum HelmLook: String, CaseIterable, Identifiable {
+    case plain, circles, pill
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .plain: return "Plain"
+        case .circles: return "Circles"
+        case .pill: return "Pill"
+        }
+    }
+}
+
 enum Glyph: String, CaseIterable, Identifiable {
     case letters, icons
 
@@ -287,15 +322,38 @@ final class Preferences: ObservableObject {
     var narrowStrip: Bool { sidebar && !sideIcons && narrowsToIcons && narrowed }
     /// Whether the column is showing as icons now: down a side, and asked
     /// for, or pulled narrow enough to become the strip.
-    var iconColumn: Bool { sidebar && sideIcons || narrowStrip }
+    var iconColumn: Bool { sidebar && sideIcons || narrowStrip || squeezedColumn }
+    /// Pulled under Metrics.squeezeLine with narrowing to the strip off,
+    /// the column keeps the width it was pulled to, down to
+    /// Metrics.sideLeast, and lays out as the column of icons there: the lights stacked, back,
+    /// forward and reload under them, and the pinned squares as many to a
+    /// row as fit, one under the other once only one does. Set while the
+    /// edge is pulled (SideBar.edge) and from the width kept.
+    @Published var squeezed = false
+    var squeezedColumn: Bool { sidebar && !sideIcons && !narrowsToIcons && squeezed }
     /// The column's width as drawn: fixed with icons only, pulled by its
     /// edge otherwise (the width pulled is kept for when titles come back),
     /// and never under the line while narrowing to the strip is on.
     var columnWidth: CGFloat {
-        iconColumn ? Metrics.iconColumn : narrowsToIcons ? max(Metrics.narrowLine, sideWidth) : sideWidth
+        squeezedColumn ? sideWidth : iconColumn ? Metrics.iconColumn : narrowsToIcons ? max(Metrics.narrowLine, sideWidth) : sideWidth
     }
     /// A tab playing sound out of sight shows at the foot of the sidebar,
     /// with its pause (see Player.swift). Off unless asked for.
+    /// The panel bar down the far edge (PanelBar.swift), and what it had
+    /// open last, for ⌥⌘P to bring back.
+    @Published var panelBar: Bool {
+        didSet { store.set(panelBar, forKey: "panel.bar") }
+    }
+    @Published var panelLast: String {
+        didSet { store.set(panelLast, forKey: "panel.last") }
+    }
+    /// Opened by a panel's own key with the bar hidden, closing that panel
+    /// hides the bar again. On unless switched off.
+    @Published var panelBarRestores: Bool {
+        didSet { store.set(panelBarRestores, forKey: "panel.restores") }
+    }
+    /// The bar came out only for the panel now open (panelBarRestores).
+    var panelBarBorrowed = false
     @Published var showsPlayer: Bool {
         didSet { store.set(showsPlayer, forKey: "sidebar.player") }
     }
@@ -304,7 +362,10 @@ final class Preferences: ObservableObject {
     var sideTitle: CGFloat { roomyTabs ? 14 : 12.5 }
     /// How wide the column is. Pulled by its edge, and remembered.
     @Published var sideWidth: CGFloat {
-        didSet { store.set(Double(sideWidth), forKey: "sidebar.width") }
+        didSet {
+            store.set(Double(sideWidth), forKey: "sidebar.width")
+            squeezed = sideWidth < Metrics.squeezeLine
+        }
     }
     /// With the tabs down the side, the page as a card: a little room
     /// around it and rounded corners (see CardEdge). On unless turned off,
@@ -429,6 +490,8 @@ final class Preferences: ObservableObject {
     @Published var hidesBack: Bool { didSet { store.set(hidesBack, forKey: "helm.back.hidden") } }
     @Published var hidesForward: Bool { didSet { store.set(hidesForward, forKey: "helm.forward.hidden") } }
     @Published var hidesReload: Bool { didSet { store.set(hidesReload, forKey: "helm.reload.hidden") } }
+    @Published var helmSize: HelmSize { didSet { store.set(helmSize.rawValue, forKey: "helm.size") } }
+    @Published var helmLook: HelmLook { didSet { store.set(helmLook.rawValue, forKey: "helm.look") } }
     /// How many of back, forward and reload are shown.
     var helmDoors: Int { [hidesBack, hidesForward, hidesReload].filter { !$0 }.count }
     /// The buttons at the column's foot (and the strip's end), each hidden on
@@ -1343,8 +1406,13 @@ final class Preferences: ObservableObject {
         narrowsToIcons = store.bool(forKey: "sidebar.narrowIcons")
         narrowed = store.bool(forKey: "sidebar.narrowed")
         showsPlayer = store.bool(forKey: "sidebar.player")
+        panelBar = store.bool(forKey: "panel.bar")
+        panelLast = store.string(forKey: "panel.last") ?? "bookmarks"
+        panelBarRestores = store.object(forKey: "panel.restores") as? Bool ?? true
         let width = store.object(forKey: "sidebar.width") as? Double ?? Double(Metrics.side)
-        sideWidth = min(Metrics.sideMax, max(Metrics.sideMin, CGFloat(width)))
+        let kept = min(Metrics.sideMax, max(Metrics.sideLeast, CGFloat(width)))
+        sideWidth = kept
+        squeezed = kept < Metrics.squeezeLine
         cards = store.object(forKey: "layout.cards") as? Bool ?? true
         cardsInFullScreen = store.bool(forKey: "layout.cardsFullScreen")
         addressLine = store.bool(forKey: "address.shown")
@@ -1372,6 +1440,8 @@ final class Preferences: ObservableObject {
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         dimsSleepingTabs = store.bool(forKey: "tabs.sleep.dim")
         hidesBack = store.bool(forKey: "helm.back.hidden")
+        helmSize = store.string(forKey: "helm.size").flatMap(HelmSize.init) ?? .large
+        helmLook = store.string(forKey: "helm.look").flatMap(HelmLook.init) ?? .plain
         hidesForward = store.bool(forKey: "helm.forward.hidden")
         hidesReload = store.bool(forKey: "helm.reload.hidden")
         hidesExtensionsDoor = store.bool(forKey: "foot.extensions.hidden")
@@ -1654,7 +1724,7 @@ final class Preferences: ObservableObject {
         take(\.narrowsToIcons, store.bool(forKey: "sidebar.narrowIcons"))
         take(\.narrowed, store.bool(forKey: "sidebar.narrowed"))
         take(\.sideWidth, "sidebar.width", (store.object(forKey: "sidebar.width") as? Double).map { CGFloat($0) }
-            .flatMap { (Metrics.sideMin...Metrics.sideMax).contains($0) ? $0 : nil }, or: Metrics.side)
+            .flatMap { (Metrics.sideLeast...Metrics.sideMax).contains($0) ? $0 : nil }, or: Metrics.side)
         take(\.sidePanelWidth, "sidepanel.width", (store.object(forKey: "sidepanel.width") as? Double).map { CGFloat($0) }
             .flatMap { Preferences.sidePanelWidths.contains($0) ? $0 : nil }, or: 380)
         take(\.cards, "layout.cards", store.object(forKey: "layout.cards") as? Bool, or: true)
