@@ -226,6 +226,11 @@ enum Metrics {
     }
     /// One of back, forward and reload, at the size chosen (HelmSize).
     @MainActor static func helmDoor(_ prefs: Preferences) -> CGFloat { (26 * prefs.helmSize.scale).rounded() }
+    /// The three's row at `scale` rather than the size chosen: how wide.
+    @MainActor static func helm(_ prefs: Preferences, scale: CGFloat) -> CGFloat {
+        let n = CGFloat(prefs.helmDoors)
+        return n == 0 ? 0 : n * (26 * scale).rounded() + (n - 1) * 2 + 8 + helmPill(prefs)
+    }
     /// The capsule's air either side, drawn as a pill (HelmLook).
     @MainActor static func helmPill(_ prefs: Preferences) -> CGFloat { prefs.helmLook == .pill ? 8 : 0 }
     /// Tabs are a fixed width rather than the width of their titles, so the

@@ -421,10 +421,10 @@ struct SearchApp: App {
                     .disabled(!(browser.active?.isWeb ?? false))
                 Button("Show Bookmarks…") { browser.bookmarking = true }
                     .shortcut("bookmarks.show")
-                Toggle("Show Bookmarks Bar", isOn: Binding(
-                    get: { browser.prefs.bookmarksBar },
-                    set: { on in withAnimation(Motion.glide) { browser.prefs.bookmarksBar = on } }
-                ))
+                // A button, not a toggle: a menu toggle never answered its key.
+                Button(browser.prefs.bookmarksBar ? "Hide Bookmarks Bar" : "Show Bookmarks Bar") {
+                    withAnimation(Motion.panel) { browser.prefs.bookmarksBar.toggle() }
+                }
                 .shortcut("bookmarks.bar")
                 // The bookmarks themselves follow, put in by AppKit (see
                 // BookmarkMenu in Bookmarks.swift).
@@ -2197,10 +2197,12 @@ struct ContentView: View {
             browser.newShyTab()
         // Shown, or brought forward if open: never a second one, and never
         // closed by the key that opened it — ⌘W does that, as for any tab.
+        // History and downloads in the panel bar (PanelBar.swift), as their
+        // menu items have them.
         case "y" where !shifted:
-            browser.recalling = true
+            browser.togglePanel(.history)
         case "j" where shifted:
-            browser.showDownloads()
+            browser.togglePanel(.downloads)
         case "v" where shifted && flags.contains(.option):
             // ⌥⇧⌘V, Paste and Match Style as in Safari: never Paste and Go.
             Browser.pasteMatchingStyle()
@@ -2238,8 +2240,11 @@ struct ContentView: View {
         case "s" where !shifted:
             // The column or the strip, folded away (see Fold.swift).
             browser.toggleFold()
-        case "b" where shifted:
+        // ⌘B adds the page, ⇧⌘B the bookmarks bar (Shortcuts.swift).
+        case "b" where !shifted:
             browser.bookmarkCurrent()
+        case "b" where shifted:
+            withAnimation(Motion.panel) { browser.prefs.bookmarksBar.toggle() }
         case "," where !shifted:
             browser.tuning = true
         case "h" where shifted:

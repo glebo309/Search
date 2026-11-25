@@ -116,9 +116,23 @@ struct SideBar: View {
     /// three doors under it.
     /// Narrower than sideMin with its titles: back, forward and reload on a
     /// row of their own under the lights, which keep the first row whole.
-    private var helmBelow: Bool {
-        !icons && width < 20 + Metrics.sideLights + Metrics.helm(prefs) && !browser.fullScreen && Metrics.helm(prefs) > 0
+    /// Back, forward and reload's size beside the lights: the size chosen,
+    /// or smaller, down to Small, while that keeps them on the lights' row.
+    private var helmScale: CGFloat {
+        let chosen = prefs.helmSize.scale
+        let n = CGFloat(prefs.helmDoors)
+        guard n > 0, !browser.fullScreen else { return chosen }
+        let room = width - 20 - Metrics.sideLights - SideBar.foldDoor(fold) - (n - 1) * 2 - 8 - Metrics.helmPill(prefs)
+        return max(0, min(chosen, room / (n * 26)))
     }
+    private var helmBelow: Bool {
+        !icons && helmScale < 1 && !browser.fullScreen && Metrics.helm(prefs) > 0
+    }
+    /// Their own row under the lights: only as tall as they are.
+    private var helmRow: CGFloat { Metrics.helmDoor(prefs) + 8 }
+    /// The lights' band with the three under it: only as tall as the lights
+    /// themselves need, so the row comes up close under them.
+    private static let lightsOnly: CGFloat = 40
     /// The foot's doors one above the other: with icons, or narrowed with
     /// titles once the doors that always show no longer fit across.
     private var footStacked: Bool {
@@ -130,14 +144,18 @@ struct SideBar: View {
     /// The stacked doors' height (Helm, vertical).
     private var stackedHelm: CGFloat { Metrics.helmDoors(prefs, stacked: true) }
     private var top: CGFloat {
-        !icons ? Metrics.strip + (helmBelow ? (helmStacked ? stackedHelm + 8 : Metrics.strip) : 0) : !strip ? lightsBand + stackedHelm + 8 : lightsBand + (stripUp ? stackedDoors : 0)
+        !icons ? (helmBelow ? SideBar.lightsOnly + (helmStacked ? stackedHelm + 8 : helmRow) : Metrics.strip) : !strip ? lightsBand + stackedHelm + 8 : lightsBand + (stripUp ? stackedDoors : 0)
     }
     private var innerEdge: Alignment { onRight ? .leading : .trailing }
 
     /// The window's buttons' corner: gone in full screen, where macOS takes
     /// them away, and back, forward and reload move up to the edge (idea 184).
     private var lights: CGFloat {
-        SideBar.lights(width, fullScreen: browser.fullScreen, fold: fold, prefs: prefs)
+        // With the three at the size they are drawn (helmScale), not the one
+        // chosen: shrunk to fit, they leave the lights their whole corner.
+        let n = CGFloat(prefs.helmDoors)
+        let doors = n == 0 ? 0 : n * (26 * helmScale).rounded() + (n - 1) * 4 + Metrics.helmPill(prefs)
+        return browser.fullScreen ? 0 : max(0, min(Metrics.sideLights, width - 20 - doors - SideBar.foldDoor(fold)))
     }
     /// The fold door, where it fits (SideBar.folds).
     private var fold: Bool { SideBar.folds(prefs, width: width, fullScreen: browser.fullScreen) }
@@ -241,15 +259,15 @@ struct SideBar: View {
                     .frame(height: lightsBand)
             } else if helmBelow {
                 DragStrip(menu: columnMenu)
-                    .frame(height: Metrics.strip)
+                    .frame(height: SideBar.lightsOnly)
             } else {
                 HStack(spacing: 0) {
                     DragStrip(menu: columnMenu)
                         .frame(width: 10 + lights)
                     // Back, forward and reload's, as tall as they are: above
                     // and below them the band is still title bar.
-                    DragStrip(reserved: SideBar.foldDoor(fold) + Metrics.helm(prefs), band: 30, menu: columnMenu)
-                        .frame(width: SideBar.foldDoor(fold) + Metrics.helm(prefs))
+                    DragStrip(reserved: SideBar.foldDoor(fold) + Metrics.helm(prefs, scale: helmScale), band: 30, menu: columnMenu)
+                        .frame(width: SideBar.foldDoor(fold) + Metrics.helm(prefs, scale: helmScale))
                     // The doors, when they are up here, at its far end.
                     DragStrip(trailing: doorsTop ? upRoom + 10 : 0, menu: columnMenu)
                 }
@@ -273,7 +291,7 @@ struct SideBar: View {
                             .padding(.bottom, 8)
                     }
                 } else if helmBelow {
-                    Color.clear.frame(height: Metrics.strip)
+                    Color.clear.frame(height: SideBar.lightsOnly)
                     if helmStacked {
                         Helm(browser: browser, vertical: true)
                             .frame(maxWidth: .infinity)
@@ -281,7 +299,7 @@ struct SideBar: View {
                     } else {
                         Helm(browser: browser, spread: true)
                             .frame(maxWidth: .infinity)
-                            .frame(height: Metrics.strip)
+                            .frame(height: helmRow, alignment: .top)
                     }
                     if prefs.addressLine {
                         AddressLine(browser: browser, height: prefs.sideRow)
@@ -295,7 +313,7 @@ struct SideBar: View {
                             FoldDoor(browser: browser, right: prefs.sidePosition == .right)
                                 .padding(.trailing, SideBar.foldDoor(true) - 26)
                         }
-                        Helm(browser: browser, spread: !prefs.doorsUp)
+                        Helm(browser: browser, spread: !prefs.doorsUp, scale: helmScale)
                         Spacer(minLength: 0)
                     }
                     .frame(height: Metrics.strip)

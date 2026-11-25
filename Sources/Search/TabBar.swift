@@ -792,19 +792,23 @@ struct Helm: View {
     /// Spread across the room it is given, each an even share: on a row of
     /// their own under the lights (SideBar.helmBelow).
     var spread = false
+    /// A size of their own in place of the one chosen: smaller, to stay
+    /// beside the lights (SideBar.helmScale).
+    var scale: CGFloat? = nil
     @ObservedObject private var prefs: Preferences
     @Environment(\.greys) private var greys
 
-    init(browser: Browser, vertical: Bool = false, spread: Bool = false) {
+    init(browser: Browser, vertical: Bool = false, spread: Bool = false, scale: CGFloat? = nil) {
         self.browser = browser
         self.vertical = vertical
         self.spread = spread
+        self.scale = scale
         self.prefs = browser.prefs
     }
 
     var body: some View {
         doors
-            .environment(\.doorScale, vertical ? 1 : prefs.helmSize.scale)
+            .environment(\.doorScale, vertical ? 1 : scale ?? prefs.helmSize.scale)
             .environment(\.doorLook, prefs.helmLook)
             .environment(\.doorSpread, spread && !vertical)
             .padding(.horizontal, prefs.helmLook == .pill && !vertical ? 4 : 0)
