@@ -18,6 +18,9 @@ struct SplitStage: View {
     @State private var frames: [Tab.ID: CGRect] = [:]
     /// The page under the pointer, with two up.
     @State private var hovered: Tab.ID?
+    /// The pointer is on a page's controls (SplitControls.swift), which keeps
+    /// them up even where the stage no longer says it is over that page.
+    @State private var onControls: Tab.ID?
 
     var body: some View {
         // The page of a space on its way in, already (Browser.pageAhead).
@@ -63,6 +66,19 @@ struct SplitStage: View {
                             .offset(x: frame.minX, y: frame.minY)
                     }
                 }
+                // Move, take out or close the page under the pointer.
+                if shown.count > 1, drag.preview == nil {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, tab in
+                        if let frame = frames[tab.id], hovered == tab.id || onControls == tab.id {
+                            SplitPaneControls(browser: browser, tab: tab, index: index, count: shown.count)
+                                .onHover { onControls = $0 ? tab.id : (onControls == tab.id ? nil : onControls) }
+                                .frame(width: frame.width)
+                                .padding(.top, 8)
+                                .offset(x: frame.minX, y: frame.minY)
+                                .transition(.opacity)
+                        }
+                    }
+                }
                 // Over a page it could split, before the hand is at an edge
                 // or has stopped: where letting go would split it. Gone once
                 // the split itself is shown.
@@ -87,6 +103,7 @@ struct SplitStage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(Motion.quick, value: drag.preview)
         .animation(Motion.quick, value: drag.over)
+        .animation(Motion.quick, value: hovered)
     }
 }
 

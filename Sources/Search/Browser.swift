@@ -4830,6 +4830,25 @@ final class Browser: NSObject, ObservableObject {
         rememberSession()
     }
 
+    /// The page one place left or right in its split, its share going with it.
+    func moveInSplit(_ tab: Tab, by step: Int) {
+        guard let index = splits.firstIndex(where: { $0.contains(tab.id) }) else { return }
+        var pair = splits[index]
+        guard let at = pair.tabs.firstIndex(of: tab.id) else { return }
+        let to = at + step
+        guard pair.tabs.indices.contains(to) else { return }
+        pair.tabs.swapAt(at, to)
+        if pair.sizes.indices.contains(at), pair.sizes.indices.contains(to) { pair.sizes.swapAt(at, to) }
+        let members = pair.tabs.compactMap { id in tabs.first { $0.id == id } }
+        guard members.count == pair.tabs.count,
+              let start = tabs.firstIndex(where: { pair.contains($0.id) }) else { return }
+        splits[index] = pair
+        var row = tabs.filter { !pair.contains($0.id) }
+        row.insert(contentsOf: members, at: min(start, row.count))
+        tabs = row
+        rememberSession()
+    }
+
     /// The divider's menu › Even Out, or a double-click on it.
     func evenSplit() {
         guard let pair = activeSplit else { return }
