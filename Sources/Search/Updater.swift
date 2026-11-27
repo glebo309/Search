@@ -49,6 +49,11 @@ final class Updater: ObservableObject {
         #endif
     }()
 
+    /// Glenn's fork: the official feed's builds would replace this one and
+    /// everything added to it, so no update is looked for, fetched or
+    /// installed. A test run handed SEARCH_FEED still checks its own feed.
+    static var off: Bool { !overridden }
+
     static var overridden: Bool {
         Store.testing && ProcessInfo.processInfo.environment["SEARCH_FEED"] != nil
     }
@@ -133,6 +138,7 @@ final class Updater: ObservableObject {
     func checkIfDue(then say: @escaping (String) -> Void) {
         self.say = say
         Swap.sweep()
+        guard !Updater.off else { return }
         // And again every hour for as long as the app is up — a browser that
         // is left open for a week would otherwise never look.
         if clock == nil {
@@ -166,6 +172,7 @@ final class Updater: ObservableObject {
             return
         default: break
         }
+        guard !Updater.off else { say?("Updates are off in this build"); return }
         guard !checking else { return }
         say?("Checking for updates…")
         check { [weak self] found in
@@ -179,6 +186,7 @@ final class Updater: ObservableObject {
     /// names, or nil when this is the latest; what becomes of it after that
     /// is said through the line handed to `checkIfDue`.
     func check(then done: @escaping (Release?) -> Void) {
+        guard !Updater.off else { done(nil); return }
         guard !checking else { return }
         checking = true
         Task { [weak self] in
@@ -257,6 +265,7 @@ final class Updater: ObservableObject {
     /// the bundle this process is running from out from under it, so the
     /// next launch takes the next one.
     private func take(_ release: Release) {
+        guard !Updater.off else { return }
         switch stage {
         case .fetching, .ready: return
         case .none, .offered, .waiting: break
