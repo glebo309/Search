@@ -387,6 +387,10 @@ enum Shells {
         watchers[owner] = watcher
         var env = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         if let path = ProcessInfo.processInfo.environment["PATH"] { env.append("PATH=\(path)") }
+        // SwiftTerm opens only OSC 8 links (Cmd-click) and finds no bare URLs, and with no
+        // TERM_PROGRAM set, Claude Code and other CLIs assume no OSC 8 and print plain text.
+        env.append("TERM_PROGRAM=Search")
+        env.append("FORCE_HYPERLINK=1")
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let name = "-" + (shell as NSString).lastPathComponent
         view.startProcess(executable: shell, args: [], environment: env, execName: name,
